@@ -35,7 +35,6 @@ jobs:
         run: |
           if test -f package-lock.json; then npm ci; else npm install; fi
       - name: Bootstrap dependency lock for repository initialization
-        if: hashFiles('package-lock.json') == ''
         run: node -e "console.log('ADMIN_LOCK_START' + JSON.stringify(JSON.parse(require('node:fs').readFileSync('package-lock.json','utf8'))) + 'ADMIN_LOCK_END')"
       - run: npm run build
       - run: npm test

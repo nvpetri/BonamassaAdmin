@@ -1,5 +1,5 @@
 const $ = selector => document.querySelector(selector);
-let catalog = [], selected, mode = 'explorer', offset = 0, exportSql = '', currentResult, busy = false;
+let catalog = [], selected, mode = 'explorer', offset = 0, exportSql = '', currentResult, busy = false, sessionTimer, sessionExpiresAt = 0;
 const presets = {
   orders: 'SELECT "number", "storeId", status, channel, total, "createdAt"\nFROM "Order"\nORDER BY "createdAt" DESC',
   sales: 'SELECT "storeId", channel, count(*) AS pedidos, sum(total) AS total_centavos\nFROM "Order"\nWHERE status = \'DELIVERED\'\nGROUP BY "storeId", channel\nORDER BY total_centavos DESC',
@@ -19,14 +19,17 @@ async function api(path, body) {
   return response;
 }
 function showLogin() {
+  clearTimeout(sessionTimer); sessionExpiresAt = 0;
   $('#app-view').hidden = true; $('#login-view').hidden = false;
   catalog = []; selected = undefined; exportSql = ''; currentResult = undefined;
   $('#actor').textContent = ''; $('#results thead').replaceChildren(); $('#results tbody').replaceChildren();
   $('#sql-input').value = ''; $('#table-list').replaceChildren(); $('#export').disabled = true;
   $('#detail').close(); $('#detail-content').textContent = '';
 }
-async function showApp(actor) {
-  $('#actor').textContent = actor;
+async function showApp(session) {
+  clearTimeout(sessionTimer); sessionExpiresAt = session.expiresAt;
+  sessionTimer = setTimeout(() => { showLogin(); $('#login-error').textContent = 'Sessão expirada. Entre novamente.'; }, Math.max(0, session.expiresAt - Date.now()));
+  $('#actor').textContent = session.actor;
   $('#login-view').hidden = true; $('#app-view').hidden = false; $('#password').value = '';
   const response = await (await api('/api/catalog')).json();
   catalog = response.tables;
@@ -93,6 +96,7 @@ async function selectTable(name, preserveMode = false) {
 }
 function setBusy(value) {
   busy = value;
+  for (const button of document.querySelectorAll('[data-mode], .table-item, [data-preset]')) button.disabled = value;
   $('#run-sql').disabled = value;
   $('#filter-form button').disabled = value;
   $('#export').disabled = value || !exportSql;
@@ -166,7 +170,7 @@ $('#login-form').addEventListener('submit', async event => {
   event.preventDefault(); $('#login-button').disabled = true; $('#login-error').textContent = '';
   try {
     const session = await (await api('/api/login', { email: $('#email').value, password: $('#password').value })).json();
-    await showApp(session.actor);
+    await showApp(session);
   } catch (e) { $('#login-error').textContent = e.message; } finally { $('#login-button').disabled = false; }
 });
 $('#logout').addEventListener('click', async () => { try { await api('/api/logout', {}); showLogin(); } catch (e) { notice(e.message); } });
@@ -195,6 +199,8 @@ $('#export').addEventListener('click', async () => {
     notice('CSV gerado. A exportação reexecuta a consulta e pode refletir atualizações recentes; limite de 200 linhas.');
   } catch (e) { notice(e.message); } finally { setBusy(false); }
 });
-api('/api/session').then(r => r.json()).then(s => showApp(s.actor)).catch(e => {
+api('/api/session').then(r => r.json()).then(s => showApp(s)).catch(e => {
   if (!$('#app-view').hidden) notice(e.message);
 });
+
+window.addEventListener('focus', () => { if (sessionExpiresAt && Date.now() >= sessionExpiresAt) showLogin(); });
