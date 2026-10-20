@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: bonamassa-admin
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: APP_ORIGIN
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_READ_DATABASE_URL
+        sync: false
+      - key: ADMIN_AUDIT_DATABASE_URL
+        sync: false

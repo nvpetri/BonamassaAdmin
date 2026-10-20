@@ -1,0 +1,23 @@
+{
+  "name": "bonamassa-admin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.mjs",
+    "build": "node scripts/check.mjs",
+    "test": "node --test test/unit.test.mjs",
+    "test:integration": "node --test test/integration.test.mjs",
+    "password:hash": "node scripts/password-hash.mjs"
+  },
+  "dependencies": {
+    "pg": "8.16.3",
+    "pgsql-ast-parser": "12.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

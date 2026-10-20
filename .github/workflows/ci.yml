@@ -1,0 +1,63 @@
+name: Admin checks
+on:
+  push:
+    branches: [main, "codex/**"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: bonamassa
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: bonamassa_admin_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bonamassa -d bonamassa_admin_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://bonamassa:ci-only-password@localhost:5432/bonamassa_admin_test
+      PGHOST: localhost
+      PGUSER: bonamassa
+      PGPASSWORD: ci-only-password
+      PGDATABASE: bonamassa_admin_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install locked dependencies (bootstrap lock only on initial commit)
+        run: |
+          if test -f package-lock.json; then npm ci; else npm install; fi
+      - name: Bootstrap dependency lock for repository initialization
+        if: hashFiles('package-lock.json') == ''
+        run: node -e "console.log('ADMIN_LOCK_START' + JSON.stringify(JSON.parse(require('node:fs').readFileSync('package-lock.json','utf8'))) + 'ADMIN_LOCK_END')"
+      - run: npm run build
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Download API migration contract
+        uses: actions/checkout@v4
+        with:
+          repository: nvpetri/APIBonamassa
+          ref: ad0093049271d925aa49d899b86e58238abdb139
+          path: api-contract
+      - name: Apply API migrations to isolated test database
+        run: |
+          for migration in api-contract/prisma/migrations/*/migration.sql; do
+            psql -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:integration
+      - name: Preserve lockfile and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-validation
+          path: |
+            package-lock.json
+            test-results/*.png
