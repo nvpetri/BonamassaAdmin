@@ -14,13 +14,14 @@ export class Database {
   }
   async close() { await Promise.all([this.reader.end(), this.logger.end()]); }
   async assertRole(pool, expected) {
-    const { rows: [role] } = await pool.query(`SELECT current_user AS name, r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolbypassrls,
+    const { rows: [role] } = await pool.query(`SELECT current_user AS name, r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolbypassrls, r.rolreplication,
       EXISTS(SELECT FROM pg_auth_members WHERE member = r.oid) AS membership
       FROM pg_roles r WHERE r.rolname = current_user`);
-    if (role.name !== expected || role.rolsuper || role.rolcreaterole || role.rolcreatedb || role.rolbypassrls || role.membership)
+    if (role.name !== expected || role.rolsuper || role.rolcreaterole || role.rolcreatedb || role.rolbypassrls || role.rolreplication || role.membership)
       throw new Error('O Admin exige papéis restritos, sem associações nem poderes administrativos.');
     const { rows } = await pool.query(`SELECT n.nspname, c.relname,
-      has_table_privilege(current_user, c.oid, 'SELECT') AS readable,
+      has_any_column_privilege(current_user, c.oid, 'SELECT') AS readable,
+      has_any_column_privilege(current_user, c.oid, 'UPDATE,REFERENCES') OR has_table_privilege(current_user, c.oid, 'DELETE,TRUNCATE,TRIGGER') AS bad_mutation,
       has_any_column_privilege(current_user, c.oid, 'INSERT,UPDATE,REFERENCES') OR has_table_privilege(current_user, c.oid, 'DELETE,TRUNCATE,TRIGGER') AS writable
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relkind IN ('r','p','v','m','f') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%'`);
@@ -28,7 +29,7 @@ export class Database {
       if (expected === 'bonamassa_admin_reader') {
         if (row.writable || (row.readable && (row.nspname !== 'bonamassa_admin' || !tables.includes(row.relname))))
           throw new Error('Leitor possui acesso fora das views autorizadas.');
-      } else if (row.readable || (row.writable && !(row.nspname === 'bonamassa_admin_private' && row.relname === 'AdminAccessLog'))) {
+      } else if (row.bad_mutation || row.readable || (row.writable && !(row.nspname === 'bonamassa_admin_private' && row.relname === 'AdminAccessLog'))) {
         throw new Error('Logger possui acesso fora do log técnico.');
       }
     }

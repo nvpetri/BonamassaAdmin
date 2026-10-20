@@ -72,6 +72,12 @@ test('isolated PostgreSQL and browser integration', { skip: !rootUrl, timeout: 1
       await root.query('GRANT SELECT ON public."User" TO bonamassa_admin_reader');
       await assert.rejects(db.verify(), /fora/);
       await root.query('REVOKE SELECT ON public."User" FROM bonamassa_admin_reader');
+      await root.query('GRANT SELECT ("passwordHash") ON public."User" TO bonamassa_admin_reader');
+      await assert.rejects(db.verify(), /fora/);
+      await root.query('REVOKE SELECT ("passwordHash") ON public."User" FROM bonamassa_admin_reader');
+      await root.query('GRANT UPDATE ON bonamassa_admin_private."AdminAccessLog" TO bonamassa_admin_logger');
+      await assert.rejects(db.verify(), /fora/);
+      await root.query('REVOKE UPDATE ON bonamassa_admin_private."AdminAccessLog" FROM bonamassa_admin_logger');
       await db.verify();
     });
     const created = await createServer(config, db); app = created.server; app.listen(0,'127.0.0.1'); await once(app,'listening');
