@@ -1,3 +1,4 @@
+import { StartupError, startupDiagnostic, startupStep } from '../src/startup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateSQL } from '../src/sql.mjs';
@@ -60,4 +61,32 @@ test('production configuration refuses owner credentials and unverified TLS', as
   assert.throws(() => readConfig({ ...env, ADMIN_READ_DATABASE_URL: env.ADMIN_READ_DATABASE_URL.replace('bonamassa_admin_reader', 'neondb_owner') }));
   assert.throws(() => readConfig({ ...env, ADMIN_READ_DATABASE_URL: env.ADMIN_READ_DATABASE_URL.replace('verify-full', 'require') }));
   assert.throws(() => readConfig({ ...env, APP_ORIGIN: 'http://admin.example.com' }));
+});
+
+test('startup diagnostics identify the stage without leaking driver errors or secrets', async () => {
+  const secret = 'postgresql://user:private-password@host/db';
+  const raw = Object.assign(new Error(secret), {code:'28P01',detail:secret,cause:new Error(secret)});
+  const auth = startupDiagnostic(raw,'READER');
+  assert.equal(auth.code,'DATABASE_AUTH_FAILED'); assert.equal(auth.stage,'READER');
+  assert.ok(!JSON.stringify(auth).includes(secret));
+  const unknown = startupDiagnostic(new Error(secret));
+  assert.equal(unknown.code,'STARTUP_FAILED'); assert.ok(!JSON.stringify(unknown).includes(secret));
+  await assert.rejects(startupStep('LOGGER',async () => { throw raw; }), error => {
+    assert.ok(error instanceof StartupError); assert.equal(error.stage,'LOGGER');
+    assert.ok(!error.message.includes(secret)); return true;
+  });
+});
+test('missing and malformed environment variables name only the affected variable', async () => {
+  const env = {NODE_ENV:'production',APP_ORIGIN:'https://admin.example.com',ADMIN_EMAIL:'tech@example.test',
+    ADMIN_PASSWORD_HASH:await hashPassword('test-only-password-123'),SESSION_SECRET:'x'.repeat(40),
+    ADMIN_READ_DATABASE_URL:'postgresql://bonamassa_admin_reader:pw@host/db?sslmode=verify-full',
+    ADMIN_AUDIT_DATABASE_URL:'postgresql://bonamassa_admin_logger:pw@host/db?sslmode=verify-full'};
+  for (const key of ['APP_ORIGIN','ADMIN_READ_DATABASE_URL','ADMIN_AUDIT_DATABASE_URL']) {
+    for (const value of ['', 'not-a-url-private-password']) {
+      const diagnostic = (() => { try { readConfig({...env,[key]:value}); } catch(e) { return startupDiagnostic(e,'CONFIG'); } })();
+      assert.equal(diagnostic.code,'CONFIG_INVALID');
+      assert.ok(diagnostic.message.includes(key));
+      assert.ok(!JSON.stringify(diagnostic).includes('not-a-url-private-password'));
+    }
+  }
 });

@@ -1,3 +1,4 @@
+import { startupDiagnostic } from './startup.mjs';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +27,7 @@ export async function createServer(config, db = new Database(config)) {
     function json(code, data) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
     try {
       const path = new URL(req.url, 'http://local').pathname;
-      if (req.method === 'GET' && path === '/health') return json(200, { status: 'ok', version: '0.1.0', commit: process.env.RENDER_GIT_COMMIT || null });
+      if (req.method === 'GET' && path === '/health') return json(200, { status: 'ok', version: '0.1.1', commit: process.env.RENDER_GIT_COMMIT || null });
       if (req.method === 'GET' && files.has(path)) {
         const file = files.get(path);
         res.writeHead(200, { 'Content-Type': file.mime }); return res.end(file.bytes);
@@ -102,14 +103,16 @@ export async function createServer(config, db = new Database(config)) {
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   let app;
+  let stage = 'CONFIG';
   try {
     const config = readConfig();
+    stage = 'DATABASE';
     app = await createServer(config);
-    app.server.listen(config.port, '0.0.0.0', () => console.log('Bonamassa Admin 0.1.0 disponível na porta ' + config.port));
+    stage = 'SERVER';
+    app.server.listen(config.port, '0.0.0.0', () => console.log('Bonamassa Admin 0.1.1 disponível na porta ' + config.port));
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => app.server.close(async () => { await app.db.close(); process.exit(0); }));
-  } catch {
-    // Connection strings and PostgreSQL errors can contain credentials. Never dump them.
-    console.error('Inicialização recusada. Verifique variáveis, conexão e permissões conforme README.');
+  } catch (error) {
+    console.error(JSON.stringify(startupDiagnostic(error, error.stage || stage)));
     if (app) await app.db.close();
     process.exit(1);
   }

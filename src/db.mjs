@@ -1,3 +1,4 @@
+import { StartupError, startupStep } from './startup.mjs';
 import pg from 'pg';
 import { validateSQL, tables, quote, literalSQL } from './sql.mjs';
 import { digest, HttpError } from './security.mjs';
@@ -18,7 +19,7 @@ export class Database {
       EXISTS(SELECT FROM pg_auth_members WHERE member = r.oid) AS membership
       FROM pg_roles r WHERE r.rolname = current_user`);
     if (role.name !== expected || role.rolsuper || role.rolcreaterole || role.rolcreatedb || role.rolbypassrls || role.rolreplication || role.membership)
-      throw new Error('O Admin exige papéis restritos, sem associações nem poderes administrativos.');
+      throw new StartupError('DATABASE_UNSAFE_PERMISSIONS','O Admin exige papéis restritos, sem associações nem poderes administrativos.');
     const { rows } = await pool.query(`SELECT n.nspname, c.relname,
       has_any_column_privilege(current_user, c.oid, 'SELECT') AS readable,
       has_any_column_privilege(current_user, c.oid, 'UPDATE,REFERENCES') OR has_table_privilege(current_user, c.oid, 'DELETE,TRUNCATE,TRIGGER') AS bad_mutation,
@@ -28,19 +29,21 @@ export class Database {
     for (const row of rows) {
       if (expected === 'bonamassa_admin_reader') {
         if (row.writable || (row.readable && (row.nspname !== 'bonamassa_admin' || !tables.includes(row.relname))))
-          throw new Error('Leitor possui acesso fora das views autorizadas.');
+          throw new StartupError('DATABASE_UNSAFE_PERMISSIONS','Leitor possui acesso fora das views autorizadas.');
       } else if (row.bad_mutation || row.readable || (row.writable && !(row.nspname === 'bonamassa_admin_private' && row.relname === 'AdminAccessLog'))) {
-        throw new Error('Logger possui acesso fora do log técnico.');
+        throw new StartupError('DATABASE_UNSAFE_PERMISSIONS','Logger possui acesso fora do log técnico.');
       }
     }
     const { rows: [schema] } = await pool.query(`SELECT EXISTS (SELECT FROM pg_namespace WHERE nspname NOT LIKE 'pg_%' AND has_schema_privilege(current_user, oid, 'CREATE')) AS writable`);
-    if (schema.writable) throw new Error('O papel técnico não pode criar objetos.');
+    if (schema.writable) throw new StartupError('DATABASE_UNSAFE_PERMISSIONS','O papel técnico não pode criar objetos.');
   }
   async verify() {
-    await this.assertRole(this.reader, 'bonamassa_admin_reader');
-    await this.assertRole(this.logger, 'bonamassa_admin_logger');
-    const catalog = await this.catalog();
-    if (catalog.length !== tables.length) throw new Error('Execute db/001_admin.sql para disponibilizar todas as views.');
+    await startupStep('READER', () => this.assertRole(this.reader, 'bonamassa_admin_reader'));
+    await startupStep('LOGGER', () => this.assertRole(this.logger, 'bonamassa_admin_logger'));
+    await startupStep('VIEWS', async () => {
+      const catalog = await this.catalog();
+      if (catalog.length !== tables.length) throw new StartupError('ADMIN_OBJECTS_MISSING', 'Execute db/001_admin.sql para disponibilizar todas as views.');
+    });
   }
   async log(context, event, outcome, extra = {}) {
     try {

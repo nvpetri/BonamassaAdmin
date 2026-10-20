@@ -1,4 +1,4 @@
-# Bonamassa Admin · 0.1.0
+# Bonamassa Admin · 0.1.1
 
 Console técnico semelhante ao uso de consulta da APSDU: URL própria no Render, explorador de tabelas, filtros, paginação, relações, detalhes JSON, editor SELECT, auditoria e CSV.
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 — 2026-10-20
+- Diagnóstico de inicialização com etapa, variável inválida ou categoria de falha do banco, sem expor credenciais, URLs ou detalhes brutos.
+- Mantém a recusa de credenciais e permissões inseguras.
+
 ## 0.1.0 — 2026-10-20
 - Serviço técnico independente com login exclusivo, sessões revogáveis e URL própria no Render.
 - Explorador das 15 tabelas da API via views restritas, filtros, paginação, tipos, relações e detalhes JSON.
