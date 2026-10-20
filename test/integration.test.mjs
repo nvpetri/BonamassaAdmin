@@ -22,6 +22,7 @@ test('isolated PostgreSQL and browser integration', { skip: !rootUrl, timeout: 1
       [user,store,'private@example.test','=1+1','11999999999','never-expose-password-hash','DRIVER']);
     await root.query('INSERT INTO "Product" ("storeId",id,category,"nameKey",data) VALUES ($1,$2,$3,$4,$5)',
       [store,'test-product','PIZZA','pizza-teste',{ name:'Pizza teste', nested: { password:'secret', token:'token-secret', email:'private@example.test', safe:'visible' } }]);
+    await root.query('INSERT INTO "Product" ("storeId",id,category,"nameKey",data) SELECT $1, \'page-\' || n, \'DRINK\', \'page-\' || n, \'{}\'::jsonb FROM generate_series(1,204) n', [store]);
     const config = readConfig({ NODE_ENV:'test', APP_ORIGIN:'http://localhost:3002', PORT:'3002', ADMIN_EMAIL:'tech@example.test',
       ADMIN_PASSWORD_HASH:await hashPassword('test-only-password-123'), SESSION_SECRET:'x'.repeat(40),
       ADMIN_READ_DATABASE_URL:'postgresql://bonamassa_admin_reader:ci-reader-only@localhost:5432/bonamassa_admin_test',
@@ -39,7 +40,7 @@ test('isolated PostgreSQL and browser integration', { skip: !rootUrl, timeout: 1
       assert.ok(!fields.includes('passwordHash')); assert.ok(!fields.includes('email'));
     });
     await t.test('queries execute, JSON is redacted, filters cannot inject SQL and logs are append-only', async () => {
-      const response = await db.run(ctx(), 'SELECT data FROM "Product"');
+      const response = await db.run(ctx(), `SELECT data FROM "Product" WHERE id = 'test-product'`);
       assert.equal(response.rows[0][0].nested.password,'[REDACTED]');
       assert.equal(response.rows[0][0].nested.safe,'visible');
       const filtered = await db.browse(ctx(), {table:'User',field:'name',operator:'equals',value:"' OR 1=1; DROP TABLE x; --"});
@@ -53,6 +54,19 @@ test('isolated PostgreSQL and browser integration', { skip: !rootUrl, timeout: 1
       assert.ok(log.rows.some(r => r.outcome === 'rejected'));
       await assert.rejects(root.query('DELETE FROM bonamassa_admin_private."AdminAccessLog"'));
       const before = await root.query('SELECT count(*) FROM "User"'); assert.equal(before.rows[0].count,'1');
+    });
+    await t.test('pagination and exports respect the displayed page and result ceilings', async () => {
+      const all = await db.run(ctx(), 'SELECT id FROM "Product"');
+      assert.equal(all.rows.length,200); assert.equal(all.truncated,true);
+      const page1 = await db.browse(ctx(), {table:'Product',sort:'id',direction:'ASC'});
+      assert.equal(page1.rows.length,100); assert.equal(page1.truncated,true);
+      const exported = await db.run(ctx(),page1.exportSql,'export');
+      assert.equal(exported.rows.length,100);
+      assert.deepEqual(exported.rows,page1.rows);
+      const page3 = await db.browse(ctx(), {table:'Product',offset:200,sort:'id',direction:'ASC'});
+      assert.equal(page3.rows.length,5); assert.equal(page3.truncated,false);
+      const filtered = await db.browse(ctx(), {table:'User',field:'name',operator:'contains',value:'=1+1'});
+      assert.equal(filtered.rows.length,1);
     });
     await t.test('permissions fail closed if a grant is accidentally widened', async () => {
       await root.query('GRANT SELECT ON public."User" TO bonamassa_admin_reader');
@@ -83,20 +97,21 @@ test('isolated PostgreSQL and browser integration', { skip: !rootUrl, timeout: 1
       await page.locator('#email').fill(config.email); await page.locator('#password').fill('test-only-password-123');
       await page.locator('#login-button').click();
       await page.locator('#app-view').waitFor({state:'visible'});
-      await page.getByRole('button',{name:'▦ User',exact:true}).click();
+      await page.getByRole('button',{name:'User',exact:true}).click();
       await page.locator('#results tbody tr').first().waitFor();
       assert.ok(!(await page.locator('#results thead').textContent()).includes('passwordHash'));
       await page.getByRole('button',{name:'Abrir detalhes do registro'}).first().click();
       await page.locator('#detail').waitFor({state:'visible'});
       await page.locator('#close-detail').click();
       await page.locator('[data-mode="sql"]').click();
-      await page.locator('#sql-input').fill('SELECT data FROM "Product"');
+      await page.locator('#sql-input').fill(`SELECT data FROM "Product" WHERE id = 'test-product'`);
       await page.locator('#run-sql').click();
       await page.getByRole('button',{name:'{ } Ver JSON'}).first().click();
       assert.match(await page.locator('#detail-content').textContent(),/REDACTED/);
       await page.locator('#close-detail').click();
       await page.locator('[data-mode="audit"]').click();
       await page.locator('#selected-table').filter({hasText:'AuditTrail'}).waitFor();
+      await page.waitForFunction(() => !document.querySelector('#filter-form button').disabled);
       await mkdir('test-results',{recursive:true});
       await page.screenshot({path:'test-results/admin-desktop.png',fullPage:true});
       await page.setViewportSize({width:390,height:844});

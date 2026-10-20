@@ -110,6 +110,6 @@ export class Database {
     const sql = 'SELECT * FROM bonamassa_admin.' + quote(table.name) + where +
       ' ORDER BY ' + quote(sort.name) + ' ' + order + ', ' + table.fields.map(f => quote(f.name) + '::text').join(', ') + ' LIMIT 101 OFFSET ' + offset;
     const result = await this.execute(context, { query: sql, template: sql, tables: [table.name] }, digest(JSON.stringify([sql, parameter])), 'browse', where ? [parameter] : []);
-    return { ...result, rows: result.rows.slice(0, 100), truncated: result.rows.length > 100, offset, pageSize: 100, exportSql: where ? sql.replace('$1', () => literalSQL(parameter)) : sql };
+    return { ...result, rows: result.rows.slice(0, 100), truncated: result.rows.length > 100, offset, pageSize: 100, exportSql: where ? sql.replace(' LIMIT 101 OFFSET ', ' LIMIT 100 OFFSET ').replace('$1', () => literalSQL(parameter)) : sql.replace(' LIMIT 101 OFFSET ', ' LIMIT 100 OFFSET ') };
   }
 }

@@ -31,11 +31,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - name: Install locked dependencies (bootstrap lock only on initial commit)
-        run: |
-          if test -f package-lock.json; then npm ci; else npm install; fi
-      - name: Bootstrap dependency lock for repository initialization
-        run: node -e "console.log('ADMIN_LOCK_START' + JSON.stringify(JSON.parse(require('node:fs').readFileSync('package-lock.json','utf8'))) + 'ADMIN_LOCK_END')"
+      - run: npm ci
       - run: npm run build
       - run: npm test
       - run: npm audit --omit=dev --audit-level=high
